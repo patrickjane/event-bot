@@ -74,6 +74,8 @@ func main() {
 	}
 
 	dg.AddHandler(guildScheduledEventCreate)
+	dg.AddHandler(guildScheduledEventUpdate)
+
 	dg.Identify.Intents = discordgo.IntentsGuildScheduledEvents | discordgo.IntentsGuildMessages
 
 	err = dg.Open()
@@ -121,9 +123,36 @@ func guildScheduledEventCreate(s *discordgo.Session, e *discordgo.GuildScheduled
 
 	// Post the creation announcement
 	msg := fmt.Sprintf("📢 **Neues Event wurde erstellt!** @everyone\n\n%s", eventURL)
-	s.ChannelMessageSend(channelID, msg)
+	//s.ChannelMessageSend(channelID, msg)
+
+	fmt.Printf("Sending message to discord: %s\n", msg)
 
 	queueReminders(event)
+}
+
+// Handler for EDITED events
+func guildScheduledEventUpdate(s *discordgo.Session, e *discordgo.GuildScheduledEventUpdate) {
+	fmt.Printf("Event '%s' was updated. Rescheduling reminders...\n", e.Name)
+
+	// 1. Remove any old/stale reminders for this specific event
+	removeRemindersForEvent(e.ID)
+
+	// 2. Queue new reminders based on the updated time
+	queueReminders(e.GuildScheduledEvent)
+}
+
+func removeRemindersForEvent(eventID string) {
+	store.Lock()
+	defer store.Unlock()
+
+	var updatedList []Reminder
+	for _, r := range store.Pending {
+		// Only keep reminders that DON'T match the updated EventID
+		if r.EventID != eventID {
+			updatedList = append(updatedList, r)
+		}
+	}
+	store.Pending = updatedList
 }
 
 func queueReminders(event *discordgo.GuildScheduledEvent) {
@@ -153,6 +182,7 @@ func queueReminders(event *discordgo.GuildScheduledEvent) {
 
 func reminderWorker(s *discordgo.Session) {
 	ticker := time.NewTicker(time.Duration(pollRate))
+
 	for range ticker.C {
 		now := time.Now()
 		store.Lock()
@@ -174,7 +204,8 @@ func reminderWorker(s *discordgo.Session) {
 				msg := fmt.Sprintf("⏰ **Reminder!** @everyone\n\nEvent '%s' startet am %s um %s!\n\n%s",
 					r.EventName, dateStr, timeStr, r.EventURL)
 
-				s.ChannelMessageSend(channelID, msg)
+				//s.ChannelMessageSend(channelID, msg)
+				fmt.Printf("Sending message to discord: %s\n", msg)
 
 			} else {
 				remaining = append(remaining, r)
